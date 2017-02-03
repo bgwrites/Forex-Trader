@@ -17,7 +17,7 @@ class trading():
       self.support = 0
       self.status = "Not Trading"
       self.currentTrade = ""
-      self.kill = False
+      self.kill = False # <----- This is a kill switch. If it is true, the bot will shut down.
 
       #initialize data channel
       s = strategyLogic()  
@@ -57,16 +57,32 @@ class trading():
       self.details = rv.get('account')      
       balance = self.details.get('NAV')
       size = 0
+      # different calculation based on trade type
       if self.enterLong() == True:
         size = abs(int((float(balance) * float(userVals.risk)) / (self.currentClose - self.support)))
       elif self.enterShort() == True:
         size = abs(int((float(balance) * float(userVals.risk)) / (self.currentClose - self.resistance)))
       return size
 
+    #Define closeout
+    def closePosition(self):
+      if self.currentTrade == "Long":
+        data = {"longUnits": "ALL"}
+        client = oandapyV20.API(access_token=userVals.key)
+        r =positions.PositionClose(accountID=userVals.accountID, instrument=userVals.instrument, data=data)
+        client.request(r)
+      elif self.currentTrade == "Long":
+        data = {"shortUnits": "ALL"}
+        client = oandapyV20.API(access_token=userVals.key)
+        r =positions.PositionClose(accountID=userVals.accountID, instrument=userVals.instrument, data=data)
+        client.request(r)      
+
     # main trading function
     def main(self):
       self.resistance = max(self.data[(userVals.count-6):userVals.count])
       self.support = min(self.data[(userVals.count-6):userVals.count])
+
+      # Oanda Parameters
       mktOrderLong = MarketOrderRequest(instrument=userVals.pair,
                       units= self.lots(),
                       takeProfitOnFill=TakeProfitDetails(price=self.resistance).data,
@@ -76,6 +92,7 @@ class trading():
                        takeProfitOnFill=TakeProfitDetails(price=self.support).data,
                        stopLossOnFill=StopLossDetails(price=self.resistance).data)
 
+      # Trading Conditions
       if self.getTrades() == 0:
         print "Looking for trades."
         if self.enterLong() == True:
@@ -94,31 +111,28 @@ class trading():
            self.currentTrade == "Short"
            print "Trade Executed"
 
-        else:
-           self.kill = True
-           print "Error"
+        elif self.enterLong() and self.enterShort() == False:
+           print "No Trades Open, Looking for Entry..."
       else:
-        if self.currentTrade == "Short":    
+        if self.currentTrade == "Short":
           if self.enterLong() == True:
-             api = oandapyV20.API(access_token=userVals.key)
-             r = orders.OrderCreate(userVals.accountID, data=mktOrderLong.data)
-             api.request(r)
+             self.closePosition()
              self.status == "Not Trading"
              print "Trade Exited"
-          else: 
+          else:
             print "No exits.. Looking"
-        elif self.currentTrade == "Long":    
+        elif self.currentTrade == "Long":
           if self.enterShort() == True:
-             api = oandapyV20.API(access_token=userVals.key)
-             r = orders.OrderCreate(userVals.accountID, data=mktOrderShort.data)
-             api.request(r)
+             self.closePosition()
              self.status == "Not Trading"
              print "Trade Exited"
-          else: 
+          else:
             print "No exits.. Looking"
-        else: 
-          print "No exits.. Looking"
+        else:
+            self.kill = True
+            print "Error, Closing down."
 
+# Run the bot and kill it if kill switch is engaged
 if __name__ == "__main__":
   t = trading()
   while(t.kill == False):
